@@ -37,46 +37,57 @@ int p = 36;  //For displaying segment "p"
 //remote interrupt values
 const byte upButton = 2;
 const byte downButton = 3;
+const byte powerButton = 18;
+const byte primeButton = 19;
 
 int dA = 0; //Right digit value
 int dB = 0; //Left digit value
 
-int newCount = LOW; //new input signaled
+boolean newCount = LOW; //new input signaled
 int lapsLeft = 0; //count of laps left
+boolean powerSave = HIGH;
+boolean primeMode = LOW;
 
 //blink values
-int blinkState = LOW;
+boolean blinkState = LOW;
 unsigned long previousBlink = 0;  // will store last blink
 const long blinkOn = 50;   // milliseconds of on-time
-const long blinkOff = 1950;  // milliseconds of off-time
+const long blinkOff = 2950;  // milliseconds of off-time
 
 //spin values
-const int spin = 150;
+const int spin = 75;
 unsigned long previousSpin = 0;
-int compA = LOW;
-int compB = LOW;
-int compC = LOW;
-int compD = HIGH;
+boolean compA = LOW;
+boolean compB = LOW;
+boolean compC = LOW;
+boolean compD = HIGH;
 
 //flash O values
 const int flash = 150;
 unsigned long previousFlash = 0;
-int flashState = LOW;
+boolean flashState = LOW;
 
 //prime values
-const int prime = 300;
+const int prime = 500;
 unsigned long previousPrime = 0;
-int primeState = LOW;
+boolean primeState = LOW;
 
+//software debounce
+unsigned long lastInterrupt;
 
 void setup() {
- //inputs
- pinMode(upButton, INPUT);
- pinMode(downButton, INPUT);
+//inputs
+pinMode(upButton, INPUT);
+pinMode(downButton, INPUT);
+pinMode(powerButton, INPUT);
+pinMode(primeButton, INPUT);
+
 
 //interrupts
 attachInterrupt(digitalPinToInterrupt(upButton), addLap, FALLING);
 attachInterrupt(digitalPinToInterrupt(downButton), minusLap, FALLING);
+attachInterrupt(digitalPinToInterrupt(powerButton), powerToggle, FALLING);
+attachInterrupt(digitalPinToInterrupt(primeButton), primeToggle, FALLING);
 
   //dA - Right digit
   pinMode(a, OUTPUT);  //A
@@ -101,8 +112,11 @@ attachInterrupt(digitalPinToInterrupt(downButton), minusLap, FALLING);
   digitalWrite(p,LOW);
   
   Serial.begin(9600);
+  Serial.println("Unit On - Power save On");
 }
 
+
+//display conditions
 void displayDA(int dA) //Display Right digit
 {
  //Conditions for displaying segment a
@@ -199,33 +213,95 @@ void alloff() //digits off
   digitalWrite(p,HIGH);
 }
 
+//interrups
 void addLap() //add lap 
 {
-  newCount = HIGH;
-  lapsLeft++;
-  alloff();
-  digitMath();
-  displayDigits();
-  Serial.println(lapsLeft);
+  if(millis() - lastInterrupt > 25 && powerSave == LOW)
+  {
+    lastInterrupt = millis();
+    newCount = HIGH;
+    lapsLeft++;
+    alloff();
+    digitMath();
+    displayDigits();
+    primeMode = LOW;
+    Serial.println(lapsLeft);
+  }
 }
 
 void minusLap() //minus lap
 {
-  if(lapsLeft >= 0)
+  if(millis() - lastInterrupt > 25 && powerSave == LOW)
   {
-  newCount = HIGH;
-  lapsLeft--;
-  alloff();
-  digitMath();
-  displayDigits();
-  Serial.println(lapsLeft);
+    lastInterrupt = millis();
+    if(lapsLeft >= 1)
+      {
+        newCount = HIGH;
+        lapsLeft--;
+        alloff();
+        digitMath();
+        displayDigits();
+        primeMode = LOW;
+        Serial.println(lapsLeft);
+      }
   }
 }
 
-void spinner()
+void powerToggle() //power toggle
+{
+  if(millis() - lastInterrupt > 1000)
+  {
+    lastInterrupt = millis();
+    if(powerSave == HIGH)
+    {
+      powerSave = LOW;
+      resetSpinner();
+      alloff();
+      digitMath();
+      displayDigits();
+      Serial.println("Power save off - Primes cleared");
+      Serial.println(lapsLeft);
+    }
+    else if(powerSave == LOW)
+    {
+      powerSave = HIGH;
+      primeMode = LOW;
+      resetSpinner();
+      alloff();
+      Serial.println("Power save on");
+    }
+  }
+}
+
+void primeToggle() //prime toggle
+{
+  if(millis() - lastInterrupt > 50)
+  {
+    lastInterrupt = millis();
+    if(primeMode == LOW && powerSave == LOW && lapsLeft != 0) //if no primes and no power save
+    {
+      primeMode = HIGH;
+      alloff();
+      Serial.println("Primes on");
+    }
+    else if(primeMode == HIGH && powerSave == LOW && lapsLeft != 0)
+    {
+      primeMode = LOW;
+      alloff();
+      digitMath();
+      displayDigits();
+      Serial.println("Primes off");
+      Serial.println(lapsLeft);
+    }
+
+  }
+}
+
+
+//modes
+void spinner() //end of race / 0 laps left
 {
   unsigned long currentMillis = millis();
-  const int spin = 75;
   if(currentMillis - previousSpin >= spin && compD == HIGH)
   {
     alloff();
@@ -238,8 +314,8 @@ void spinner()
   if(currentMillis - previousSpin >= spin && compA == HIGH)
   {
     alloff();
-    digitalWrite(b,LOW);
-    digitalWrite(m,LOW);
+    digitalWrite(d,LOW);
+    digitalWrite(h,LOW);
     previousSpin = currentMillis;
     compA = LOW;
     compB = HIGH;
@@ -256,8 +332,8 @@ void spinner()
   if(currentMillis - previousSpin >= spin && compC == HIGH)
   {
     alloff();
-    digitalWrite(d,LOW);
-    digitalWrite(h,LOW);
+    digitalWrite(b,LOW);
+    digitalWrite(m,LOW);
     previousSpin = currentMillis;
     compC = LOW;
     compD = HIGH;
@@ -298,7 +374,7 @@ void flashO()
   }
 }
 
-void primes()
+void primes() //primes mode
 {
   unsigned long currentMillis = millis();
   if(currentMillis - previousPrime >= prime)
@@ -306,6 +382,7 @@ void primes()
     previousPrime = currentMillis;  // Remember the time
     if (primeState == LOW)
     {
+      alloff();
       digitalWrite(e,LOW);
       digitalWrite(g,LOW);
       digitalWrite(h,LOW);
@@ -318,12 +395,15 @@ void primes()
     else
     {
       alloff();
+      digitMath();
+      displayDigits();
       primeState = LOW;
     }
   }
 }
 
-void blink()
+
+void blink() //power save blinker
 {
   unsigned long currentMillis = millis();
   if((blinkState == HIGH) && (currentMillis - previousBlink >= blinkOn))
@@ -342,13 +422,20 @@ void blink()
 }
 
 void loop() {
-  if(lapsLeft <= 0){
-    flashO();
+  if(lapsLeft == 0 && powerSave == LOW){
+    spinner();
   }
   if((lapsLeft > 0) && (newCount == HIGH)){
     newCount = 0;
     resetSpinner();
   }
-  
+  if(primeMode == HIGH)
+  {
+    primes();
+  }
+  if(powerSave == HIGH)
+  {
+    blink();
+  }
 }
 
